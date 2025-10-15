@@ -26,7 +26,9 @@ pip install requests colorama
 ### Step 2: Download the script
 
 ```bash
-wget https://raw.githubusercontent.com/your-repo/http-status/main/http-status.py -O http-status
+git clone https://github.com/qventymr/http-status-checker.git
+cd http-status-checker
+mv http-status.py http-status
 ```
 
 ### Step 3: Make Executable
