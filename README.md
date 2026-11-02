@@ -52,7 +52,7 @@ source ~/.bashrc
 
 ## Command Line Options
 
-usage: status-checker [-h] (-u URL | -f FILE) [-t TIMEOUT] [--no-redirect] [-v] [--user-agent USER_AGENT]
+usage: http-status [-h] (-u URL | -f FILE) [-t TIMEOUT] [--no-redirect] [-v] [--user-agent USER_AGENT]
 
 Check HTTP status code of URLs
 
@@ -68,7 +68,7 @@ options:
                         Custom User-Agent string
 
 Examples:
-  status-checker -u example.com
-  status-checker -u https://example.com -v
-  status-checker -u example.com -t 5 --no-redirect
-  status-checker -f urls.txt
+  http-status -u example.com
+  http-status -u https://example.com -v
+  http-status -u example.com -t 5 --no-redirect
+  http-status -f urls.txt
