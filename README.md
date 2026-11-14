@@ -39,9 +39,13 @@ chmod +x http-status
 
 ## Adding to PATH
 
+For a system-wide installation:
+
 ```bash
 sudo mv http-status /usr/local/bin/
 ```
+
+Or install it for your user without `sudo`:
 
 ```bash
 mkdir -p ~/.local/bin
@@ -52,6 +56,7 @@ source ~/.bashrc
 
 ## Command Line Options
 
+```text
 usage: http-status [-h] (-u URL | -f FILE) [-t TIMEOUT] [--no-redirect] [-v] [--user-agent USER_AGENT]
 
 Check HTTP status code of URLs
@@ -67,8 +72,13 @@ options:
   --user-agent USER_AGENT
                         Custom User-Agent string
 
-Examples:
-  http-status -u example.com
-  http-status -u https://example.com -v
-  http-status -u example.com -t 5 --no-redirect
-  http-status -f urls.txt
+```
+
+## Examples
+
+```bash
+http-status -u example.com
+http-status -u https://example.com -v
+http-status -u example.com -t 5 --no-redirect
+http-status -f urls.txt
+```
