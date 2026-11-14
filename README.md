@@ -4,11 +4,11 @@ A command-line Python tool to check HTTP status codes with colored terminal outp
 
 ## Features
 
-- 🎨 **Color-coded status responses** - Visual status code highlighting
-- 📊 **Detailed information** - Response time, redirects, content size
-- 📁 **Batch processing** - Check multiple URLs from a file
-- ⚙️ **Flexible options** - Custom timeouts, User-Agents, redirect control
-- 🚀 **Fast and lightweight** - Minimal dependencies
+- **Clear status output** — Color-coded HTTP status codes for quick scanning.
+- **Response insights** — Response times, redirects, and content size.
+- **Batch checking** — Check multiple URLs from a text file.
+- **Configurable requests** — Set timeouts, custom User-Agent headers, and redirect behavior.
+- **Minimal dependencies** — Lightweight Python CLI built with `requests` and `colorama`.
 
 ## Installation
 
