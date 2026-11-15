@@ -82,3 +82,23 @@ http-status -u https://example.com -v
 http-status -u example.com -t 5 --no-redirect
 http-status -f urls.txt
 ```
+
+URLs without a scheme use HTTPS. Explicit schemes must be HTTP or HTTPS.
+Timeouts must be positive integers. URL files are UTF-8 (an optional BOM is
+accepted), with blank lines ignored; an empty file is an error. Batch checks
+continue after invalid URLs or failed requests.
+
+## Exit Codes
+
+- `0`: Every URL returned an HTTP response, including 4xx and 5xx responses.
+- `1`: An invalid URL, a failed request, or an unreadable or empty URL file.
+- `2`: Invalid command-line arguments, including a non-positive timeout.
+- `130`: Interrupted with Ctrl+C.
+
+## Tests
+
+Run from a fresh clone, before renaming or moving the script:
+
+```bash
+python -m unittest discover -v
+```

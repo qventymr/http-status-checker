@@ -3,12 +3,11 @@
 import requests
 from colorama import init, Fore, Style
 import argparse
+import re
 import sys
 from urllib.parse import urlparse
 import time
 
-
-init(autoreset=True)
 
 def check_status_code(url, timeout=10, follow_redirects=True, user_agent=None):
     try:
@@ -80,18 +79,45 @@ def format_result(result, verbose=False):
     return base_output
 
 def validate_url(url):
-    if not url.startswith(('http://', 'https://')):
+    url = url.strip()
+    if not url:
+        raise ValueError("URL must not be empty")
+    if any(character.isspace() or ord(character) < 32 or ord(character) == 127
+           for character in url):
+        raise ValueError("URL must not contain whitespace or control characters")
+
+    scheme = re.match(r'^([a-z][a-z0-9+.-]*):', url, re.IGNORECASE)
+    if url.startswith('//'):
+        url = 'https:' + url
+    elif scheme and scheme.group(1).lower() in ('http', 'https'):
+        pass
+    elif scheme and not re.match(r'^[^/?#]+:[0-9]+(?:[/?#]|$)', url):
+        raise ValueError("Only HTTP and HTTPS URLs are supported")
+    else:
         url = 'https://' + url
-    
+
     try:
         parsed = urlparse(url)
-        if not parsed.netloc:
-            raise ValueError("Invalid URL: no network location")
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise ValueError("HTTP(S) URL must include a hostname")
+        # Accessing .port validates both its syntax and range.
+        parsed.port
         return url
-    except Exception as e:
+    except ValueError as e:
         raise ValueError(f"Invalid URL: {e}")
 
-def main():
+
+def positive_timeout(value):
+    try:
+        timeout = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Timeout must be a positive integer")
+    if timeout <= 0:
+        raise argparse.ArgumentTypeError("Timeout must be a positive integer")
+    return timeout
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Check HTTP status code of URLs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -108,7 +134,7 @@ Examples:
     url_group.add_argument('-u', '--url', help="URL to check (e.g., example.com or https://example.com)")
     url_group.add_argument('-f', '--file', help="File containing URLs to check (one per line)")
     
-    parser.add_argument('-t', '--timeout', type=int, default=10, 
+    parser.add_argument('-t', '--timeout', type=positive_timeout, default=10,
                        help="Request timeout in seconds (default: 10)")
     parser.add_argument('--no-redirect', action='store_true',
                        help="Do not follow redirects")
@@ -117,56 +143,51 @@ Examples:
     parser.add_argument('--user-agent', 
                        help="Custom User-Agent string")
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    init(autoreset=True)
     
     try:
-        if args.url:
-            url = validate_url(args.url)
-            result = check_status_code(
-                url, 
-                timeout=args.timeout,
-                follow_redirects=not args.no_redirect,
-                user_agent=args.user_agent
-            )
-            print(format_result(result, args.verbose))
-        
-        elif args.file:
+        batch = args.file is not None
+        if batch:
             try:
-                with open(args.file, 'r', encoding='utf-8') as f:
+                with open(args.file, 'r', encoding='utf-8-sig') as f:
                     urls = [line.strip() for line in f if line.strip()]
-                
-                print(f"{Fore.CYAN}Checking {len(urls)} URLs...{Style.RESET_ALL}\n")
-                
-                for i, url in enumerate(urls, 1):
-                    try:
-                        valid_url = validate_url(url)
-                        result = check_status_code(
-                            valid_url,
-                            timeout=args.timeout,
-                            follow_redirects=not args.no_redirect,
-                            user_agent=args.user_agent
-                        )
-                        print(f"{i:3d}. [{validate_url(url)}] {format_result(result, args.verbose)}")
-                    except ValueError as e:
-                        error_color = Fore.RED + Style.BRIGHT
-                        print(f"{i:3d}. {error_color}● {Fore.WHITE}Invalid URL: {url} - {e}")
-    
-                    if i < len(urls):
-                        time.sleep(0.1)
-                        
-            except FileNotFoundError:
-                print(f"{Fore.RED}Error: File '{args.file}' not found")
-                sys.exit(1)
-            except Exception as e:
-                print(f"{Fore.RED}Error reading file: {e}")
-                sys.exit(1)
-    
+            except (OSError, UnicodeError) as e:
+                print(f"{Fore.RED}Error reading file '{args.file}': {e}", file=sys.stderr)
+                return 1
+            if not urls:
+                print(f"{Fore.RED}Error: URL file is empty", file=sys.stderr)
+                return 1
+            print(f"{Fore.CYAN}Checking {len(urls)} URLs...{Style.RESET_ALL}\n")
+        else:
+            urls = [args.url]
+
+        exit_code = 0
+        for i, url in enumerate(urls, 1):
+            try:
+                valid_url = validate_url(url)
+            except ValueError as e:
+                prefix = f"{i:3d}. " if batch else ''
+                print(f"{prefix}{Fore.RED}Invalid URL: {url} - {e}", file=sys.stderr)
+                exit_code = 1
+            else:
+                result = check_status_code(
+                    valid_url,
+                    timeout=args.timeout,
+                    follow_redirects=not args.no_redirect,
+                    user_agent=args.user_agent
+                )
+                prefix = f"{i:3d}. [{valid_url}] " if batch else ''
+                print(prefix + format_result(result, args.verbose))
+                if not result['success']:
+                    exit_code = 1
+            if i < len(urls):
+                time.sleep(0.1)
+        return exit_code
+
     except KeyboardInterrupt:
-        print(f"\n{Fore.YELLOW}Operation cancelled by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"{Fore.RED}Unexpected error: {e}")
-        sys.exit(1)
+        print(f"\n{Fore.YELLOW}Operation cancelled by user", file=sys.stderr)
+        return 130
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
