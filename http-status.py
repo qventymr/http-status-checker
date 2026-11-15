@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-import requests
-from colorama import init, Fore, Style
 import argparse
 import re
 import sys
-from urllib.parse import urlparse
 import time
+from urllib.parse import urlparse
+
+import requests
+from colorama import Fore, Style, init
 
 
 def check_status_code(url, timeout=10, follow_redirects=True, user_agent=None):
@@ -15,34 +16,41 @@ def check_status_code(url, timeout=10, follow_redirects=True, user_agent=None):
         if user_agent:
             headers['User-Agent'] = user_agent
         
-        start_time = time.time()
-        response = requests.get(
-            url, 
-            timeout=timeout, 
+        start_time = time.perf_counter()
+        with requests.get(
+            url,
+            timeout=timeout,
             allow_redirects=follow_redirects,
-            headers=headers
-        )
-        elapsed_time = (time.time() - start_time) * 1000
-        
-        result = {
-            'success': True,
-            'status_code': response.status_code,
-            'reason': response.reason,
-            'response_time': elapsed_time,
-            'final_url': response.url,
-            'redirected': response.history != [],
-            'content_length': len(response.content),
-            'headers': dict(response.headers)
-        }
-        
-        return result
-        
+            headers=headers,
+            stream=True
+        ) as response:
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            try:
+                content_length = int(response.headers.get('Content-Length', ''))
+                if content_length < 0:
+                    content_length = None
+            except ValueError:
+                content_length = None
+
+            return {
+                'success': True,
+                'status_code': response.status_code,
+                'reason': response.reason,
+                'response_time': elapsed_time,
+                'url': url,
+                'final_url': response.url,
+                'redirected': bool(response.history),
+                'content_length': content_length,
+                'headers': dict(response.headers)
+            }
+
     except requests.exceptions.RequestException as e:
         return {
             'success': False,
             'error': str(e),
             'error_type': type(e).__name__
         }
+
 
 def get_status_color(status_code):
     if 100 <= status_code < 200:
@@ -56,6 +64,7 @@ def get_status_color(status_code):
     else:
         return Fore.RED + Style.BRIGHT     # Server Error
 
+
 def format_result(result, verbose=False):
     if not result['success']:
         error_color = Fore.RED + Style.BRIGHT
@@ -68,15 +77,18 @@ def format_result(result, verbose=False):
     base_output = f"{status_display} {time_display}"
     
     if verbose:
+        content_size = (f"{result['content_length']} bytes"
+                        if result['content_length'] is not None else 'unknown')
         verbose_info = [
-            f"{Fore.CYAN}URL:{Fore.WHITE} {result['final_url']}",
+            f"{Fore.CYAN}URL:{Fore.WHITE} {result['url']}",
             f"{Fore.CYAN}Redirected:{Fore.WHITE} {result['redirected']}",
-            f"{Fore.CYAN}Content Size:{Fore.WHITE} {result['content_length']} bytes",
+            f"{Fore.CYAN}Content-Length:{Fore.WHITE} {content_size}",
             f"{Fore.CYAN}Final URL:{Fore.WHITE} {result['final_url']}"
         ]
         return base_output + "\n" + "\n".join(verbose_info)
     
     return base_output
+
 
 def validate_url(url):
     url = url.strip()
@@ -188,6 +200,7 @@ Examples:
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}Operation cancelled by user", file=sys.stderr)
         return 130
+
 
 if __name__ == "__main__":
     sys.exit(main())

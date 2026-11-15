@@ -5,7 +5,7 @@ A command-line Python tool to check HTTP status codes with colored terminal outp
 ## Features
 
 - **Clear status output** — Color-coded HTTP status codes for quick scanning.
-- **Response insights** — Response times, redirects, and content size.
+- **Response insights** — Response times, redirects, and server-declared content length.
 - **Batch checking** — Check multiple URLs from a text file.
 - **Configurable requests** — Set timeouts, custom User-Agent headers, and redirect behavior.
 - **Minimal dependencies** — Lightweight Python CLI built with `requests` and `colorama`.
@@ -87,6 +87,14 @@ URLs without a scheme use HTTPS. Explicit schemes must be HTTP or HTTPS.
 Timeouts must be positive integers. URL files are UTF-8 (an optional BOM is
 accepted), with blank lines ignored; an empty file is an error. Batch checks
 continue after invalid URLs or failed requests.
+
+The checker sends a GET request and closes the final response after receiving
+its headers, without downloading its body. Verbose output shows the original
+and final URLs. `Content-Length` is the server-declared transfer size, which may
+differ from the decoded body size; it is shown as `unknown` when absent or
+invalid. Response time uses a monotonic clock and measures time until the final
+headers arrive, including redirects. The timeout applies to connecting and
+waiting for socket data, rather than a total deadline for the entire check.
 
 ## Exit Codes
 

@@ -1,10 +1,13 @@
 import contextlib
 import importlib.util
 import io
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from socketserver import ThreadingMixIn
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 
 SCRIPT = Path(__file__).with_name('http-status.py')
@@ -133,6 +136,148 @@ class CLITests(unittest.TestCase):
             ['-u', 'example.com'], KeyboardInterrupt())
         self.assertEqual(status, 130)
         self.assertIn('cancelled', stderr)
+
+
+class RequestTests(unittest.TestCase):
+    def make_response(self, headers=None):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 200
+        response.reason = 'OK'
+        response.url = 'https://other.test/'
+        response.history = [object()]
+        response.headers = headers or {}
+        type(response).content = PropertyMock(
+            side_effect=AssertionError('Response body must not be read'))
+        return response
+
+    def test_streams_response_closes_it_and_uses_monotonic_time(self):
+        response = self.make_response({'Content-Length': '123'})
+        with patch.object(http_status.requests, 'get', return_value=response) as get, \
+                patch.object(http_status.time, 'perf_counter', side_effect=[10, 10.25]):
+            result = http_status.check_status_code(
+                'https://example.com/', timeout=5, follow_redirects=False,
+                user_agent='test-agent')
+        self.assertTrue(result['success'])
+        self.assertEqual(result['url'], 'https://example.com/')
+        self.assertEqual(result['final_url'], 'https://other.test/')
+        self.assertTrue(result['redirected'])
+        self.assertEqual(result['content_length'], 123)
+        self.assertEqual(result['response_time'], 250)
+        get.assert_called_once_with(
+            'https://example.com/', timeout=5, allow_redirects=False,
+            headers={'User-Agent': 'test-agent'}, stream=True)
+        response.__exit__.assert_called_once()
+
+    def test_missing_or_invalid_lengths_are_unknown(self):
+        for value in (None, '', '-1', 'invalid', '0', '42'):
+            with self.subTest(value=value):
+                headers = {} if value is None else {'Content-Length': value}
+                response = self.make_response(headers)
+                with patch.object(http_status.requests, 'get', return_value=response):
+                    result = http_status.check_status_code('https://example.com/')
+                expected = int(value) if value in ('0', '42') else None
+                self.assertEqual(result['content_length'], expected)
+                self.assertTrue(result['success'])
+
+    def test_request_errors_are_returned(self):
+        for error in (http_status.requests.exceptions.Timeout('timed out'),
+                      http_status.requests.exceptions.ConnectionError('refused'),
+                      http_status.requests.exceptions.TooManyRedirects('loop'),
+                      http_status.requests.exceptions.InvalidHeader('bad header')):
+            with self.subTest(error=type(error).__name__), \
+                    patch.object(http_status.requests, 'get', side_effect=error):
+                result = http_status.check_status_code('https://example.com/')
+                self.assertFalse(result['success'])
+                self.assertEqual(result['error_type'], type(error).__name__)
+
+    def test_verbose_output_distinguishes_urls_and_unknown_length(self):
+        response = self.make_response()
+        with patch.object(http_status.requests, 'get', return_value=response):
+            result = http_status.check_status_code('https://example.com/')
+        output = http_status.format_result(result, verbose=True)
+        self.assertIn('https://example.com/', output)
+        self.assertIn('https://other.test/', output)
+        self.assertIn('unknown', output)
+        self.assertNotIn('None bytes', output)
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+class HTTPIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/redirect':
+                    self.send_response(302)
+                    self.send_header('Location', '/ok')
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                elif self.path == '/headers-only':
+                    self.send_response(200)
+                    self.send_header('Content-Length', '1000000000')
+                    self.end_headers()
+                    # A body-reading client times out; a header-only check returns.
+                    self.server.release_body.wait(5)
+                else:
+                    self.send_response(503 if self.path == '/error' else 200)
+                    self.send_header('Content-Length', '2')
+                    self.send_header('X-Seen-User-Agent', self.headers['User-Agent'])
+                    self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        cls.server = ThreadedHTTPServer(('127.0.0.1', 0), Handler)
+        cls.server.release_body = threading.Event()
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base_url = 'http://127.0.0.1:{}'.format(cls.server.server_port)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.release_body.set()
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
+
+    def check(self, path, **options):
+        # Avoid proxy settings on the host affecting loopback tests.
+        with patch.dict('os.environ', {'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}):
+            return http_status.check_status_code(self.base_url + path, timeout=1, **options)
+
+    def test_returns_status_without_waiting_for_body(self):
+        try:
+            result = self.check('/headers-only')
+            self.assertTrue(result['success'], result)
+            self.assertEqual(result['status_code'], 200)
+            self.assertEqual(result['content_length'], 1000000000)
+        finally:
+            self.server.release_body.set()
+
+    def test_follows_redirects_and_sends_user_agent(self):
+        result = self.check('/redirect', user_agent='integration-agent')
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['status_code'], 200)
+        self.assertTrue(result['redirected'])
+        self.assertEqual(result['url'], self.base_url + '/redirect')
+        self.assertEqual(result['final_url'], self.base_url + '/ok')
+        self.assertEqual(result['headers']['X-Seen-User-Agent'], 'integration-agent')
+
+    def test_can_disable_redirects(self):
+        result = self.check('/redirect', follow_redirects=False)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['status_code'], 302)
+        self.assertFalse(result['redirected'])
+        self.assertEqual(result['final_url'], self.base_url + '/redirect')
+
+    def test_http_error_remains_a_successful_check(self):
+        result = self.check('/error')
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['status_code'], 503)
 
 
 if __name__ == '__main__':
