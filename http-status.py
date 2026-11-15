@@ -66,12 +66,19 @@ def get_status_color(status_code):
 
 
 def format_result(result, verbose=False):
+    marker = '●'
+    encoding = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+    try:
+        marker.encode(encoding)
+    except UnicodeEncodeError:
+        marker = '*'
+
     if not result['success']:
         error_color = Fore.RED + Style.BRIGHT
-        return f"{error_color}● {Fore.WHITE}Error ({result['error_type']}): {result['error']}"
+        return f"{error_color}{marker} {Fore.WHITE}Error ({result['error_type']}): {result['error']}"
     
     color = get_status_color(result['status_code'])
-    status_display = f"{color}● {Fore.WHITE}{result['status_code']} {result['reason']}"
+    status_display = f"{color}{marker} {Fore.WHITE}{result['status_code']} {result['reason']}"
     time_display = f"{Fore.WHITE}- {result['response_time']:.0f}ms"
     
     base_output = f"{status_display} {time_display}"

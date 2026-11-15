@@ -1,6 +1,7 @@
 # HTTP Status Checker
 
 A command-line Python tool to check HTTP status codes with colored terminal output.
+The status marker falls back to `*` when the output encoding cannot display `●`.
 
 ## Features
 

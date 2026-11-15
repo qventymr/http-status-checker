@@ -1,9 +1,12 @@
 import contextlib
 import importlib.util
 import io
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from socketserver import ThreadingMixIn
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -278,6 +281,27 @@ class HTTPIntegrationTests(unittest.TestCase):
         result = self.check('/error')
         self.assertTrue(result['success'], result)
         self.assertEqual(result['status_code'], 503)
+
+    def test_cli_process_handles_legacy_output_encoding_and_exit_codes(self):
+        environment = dict(os.environ, PYTHONIOENCODING='cp1251',
+                           NO_PROXY='127.0.0.1', no_proxy='127.0.0.1')
+        cases = [
+            (['-u', self.base_url + '/ok', '-v'], 0, '* 200'),
+            (['-u', self.base_url + '/error'], 0, '* 503'),
+            (['-u', self.base_url + '/ok', '--user-agent', 'bad\nheader'],
+             1, '* Error (InvalidHeader)'),
+            (['-u', 'ftp://example.com'], 1, 'Invalid URL:'),
+            (['-u', self.base_url + '/ok', '-t', '0'], 2, 'positive integer'),
+        ]
+        for arguments, expected_status, expected_output in cases:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT)] + arguments,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=environment, timeout=10)
+                output = (result.stdout + result.stderr).decode('cp1251')
+                self.assertEqual(result.returncode, expected_status, output)
+                self.assertIn(expected_output, output)
 
 
 if __name__ == '__main__':
